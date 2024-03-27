@@ -65,3 +65,91 @@ explicit identity를 이용해 상단으로 scroll을 구현한다.
 **Every view has an identity**
 
 모든 뷰는 identity를 가지고 있다. 명시적인 identity가 없다면, 암시적인 identity를 갖고 있는데 이는 SwiftUI가 뷰에게 부여한 것이며 이를 structural identity라고 한다. 
+
+### Structural Identity
+
+> SwiftUI uses the structure of your view hierarchy to generate implicit identities for your views so you don't have to.
+> ...
+> We're using the relative arrangement of our subjects to distinguish them from each other -- that's structural identity.
+
+View의 위치가 고정되어 있다면, 위치를 암시적인 id로 사용할 수 있겠다.
+
+> SwiftUI leverages structural identity throughout its API, and a classic example is when you use if statements and other conditional logic within your View code.
+
+SwiftUI에서는 API 전반에 걸쳐 구조적 동일성을 활용하며, 대표적인 예로 View 코드 내에서 if 문 및 기타 조건부 논리를 사용하는 경우를 들 수 있습니다.
+
+#### Structural Identity의 예: If 문
+
+> The structure of the conditional statement gives us a clear way to identify each view.
+> 
+> ...
+> 
+> However, this only works if SwiftUI can statically guarantee that these views stay where they are and never swap places. SwiftUI accomplishes this by lookig at the type structre of your view hierarchy. When SwiftUI looks at your views, it sees their generic types -- in this case, our if statement translated into a _ConditionalContent view, which is generic over its true and false content.
+
+```swift
+@ViewBuilder // implicit
+var body: some View {
+	if rescueDogs.isEmpty {
+		AdoptionDirectory(selection: $rescueDogs)
+	} else {
+		DogList(rescueDogs)
+	}
+}
+
+// generic type
+some View = 
+	_ConditionalContent<
+		AdoptionDirectory,
+		DogList
+	>
+```
+
+if문의 두 분기는 각각 `AdoptionDirectory` 뷰와 `DogList` 뷰로 나뉜다. 전자는 반드시 조건문이 참일 때, 후자는 조건문이 거짓일 때 보여지는 뷰이다. 즉, 조건문 아래 뷰는 참/거짓일 때 실행된다는 점에서 언제 어떤 뷰가 실행될 지 명확하게 식별 가능하다.
+
+SwiftUI가 봤을 때 특정 뷰가 제자리에 유지되고 절대 자리를 바꾸지 않도록 정적으로 보장할 수 있는 경우에 특정 뷰에 구조적 동일성이 작동한다.
+
+그렇다면 SwiftUI는 이를 어떻게 볼까?
+
+#### SwiftUI가 Structural Identity
+
+
+SwiftUI는 코드에서 generic type을 살펴봄으로써 뷰 계층 구조의 유형 구조(type structure)를 확인한다.
+Swift의 result builder인 ViewBuilder가 코드를 Generic type으로 변환한다.
+
+View 프로토콜은 암시적으로 body 프로퍼티를 ViewBuilder로 감싸고, ViewBuilder는 body의 논리 문(if statement)에서 단일 제네릭 뷰를 구성한다.
+body 프로퍼티의 반환 유형인 some View는 정적 복합 유형을 나타내는 자리 표시자로, 코드가 복잡해지지 않도록 숨겨져 있다.
+이 제네릭 유형을 사용하면 SwiftUI에서 참일 때 뷰는 항상 AdoptionDirectory가 되고 거짓일 때 뷰는 항상 DogList가 되어 암시적이고 안정적인 ID를 배후에서 할당할 수 있다.
+
+#### Good Dog, Bad Dog 예제에서
+```swift
+VStack {
+	if dog.isGood {
+		PawView(tint: .green)
+		Spacer()
+	} else {
+		Spacer()
+		PawView(tint: .red)
+	}
+}
+
+// Recommended!
+PawView(tint: dog.isGood ? .green : .red)
+	.frame(
+		maxHeight: .infinity,
+		alignment: dog.isGood ? .top : .bottom
+	)
+```
+
+
+위 코드에는 각 조건 분기마다 다른 보기를 정의하는 if 문이 있음
+이렇게 하면 SwiftUI가 if 문의 각 분기별로 고유한 정체성을 가진 다른 뷰라고 이해하기 때문에 뷰가 안팎으로 전환
+
+
+하나의 단일한 view에 modifier만 바꾸면, 계속 동일한 뷰로 인식되어서 원하던 부드러운 animation을 볼 수 있음.
+
+이 두 가지 전략 모두 효과가 있을 수 있지만 SwiftUI에서는 일반적으로 두 번째 접근 방식을 권장함.
+기본적으로 아이덴티티를 유지하고 보다 유동적인 전환을 제공하도록 함.
+이는 또한 뷰의 수명과 상태를 보존하는 데 도움이 되며, 이에 대해서는 나중에 자세히 설명할 것.
+
+이제 구조적 아이덴티티를 이해했으니 이제 그 사악한 천적인 애니뷰에 대해 이야기해보자.
+#### AnyView[11:50]
