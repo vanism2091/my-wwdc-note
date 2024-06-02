@@ -177,6 +177,209 @@ struct OpenShelf: AppIntent {
 정적인 shelf가 아니라, 동적인 book을 열고 싶다면? 이를 위해 Entity가 필요하다.
 
 ## Entities, queries, and results [09:55~]
+개체의 인스턴스를 제공하기 위해 앱은 쿼리를 실행하고 intents의 결과로 entity를 되돌려준다.
+
+- Suggested Entities
+	- 앱이 제공한 제안된 개체들의 집합
+- Search
+	- 
+Intent를 만들기 전에, Entity와 이에 상응하는 Query를 만들어야 한다.
+### Entity 만들기
+- Identifier
+- Display Respresentation
+- Entity Type Name
+
+```swift
+// 1
+struct BookEntity: AppEntity, Identifiable {
+	// 2
+	var id: UUID
+	// 3
+	var displayRepresentation: DisplayRepresentation {
+		DisplayRepresentation(title: "\(title)")
+	}
+	// 4
+	static var typeDisplayName: LocalizedStringResources = "Book"
+}
+```
+
+1. Entity를 만들기 위해, `AppEntity` 프로토콜을 채택한다
+2. Identifier: `Identifiable` 프로토콜을 채택하고, id를 구현한다.
+	1. App Intents는 이 id로 개체를 참고한다.
+	2. stable, persistent해야 한다. (고객이 만든 단축어에 저장될 수 있기 때문)
+3. `Display Representation` 를 구현한다
+	1. 개체를 보여주는 데 사용됨
+	2. subtitle과 image를 제공할 수도 있다.
+4. `Type Display Name`
+	1. 개체의 타입을 나타내는 문자열
+5. Query 추가
+6. 
 
 
+### Queries
+- Queries are an interface for retrieving Entities from your app
+	- 앱 인터페이스를 시스템에 부여한다.
+- Lookup entities 요구 사항
+	- All Queries look up entities by ID (ID로 검색할 수 있다)
+	- `StringQuery` looks up entities using a search string 
+		- string은 검색을 지원한다.
+	- `PropertyQuery` looks up entities based on other criteria
+		- 더 유연한
+	- Queries can provide **suggested entities** to pick from
+		- 모든 쿼리가 제안된 개체를 제공할 수 있다.
+		- 사용자에게 목록을 보여주고, 사용자는 선택할 수 있는.
 
+- 시스템이 개체의 인스턴스를 찾을 수 있게, 모든 entity는 query와 연관되어야 함
+
+
+```swift
+// 1
+struct BookQuery: EntityQuery {
+	// 2
+	func entities(for identifiers: [BookEntity.ID]) async throws -> [BookEntity] {
+		identifiers.compactMap { identifiers in
+			Database.shared.book(for: identifiers)
+		}
+	}
+}
+
+struct BookEntity: AppEntity. Identifiable {
+	var id: UUID
+	// ...
+	// 3
+	static var defaultQuery = BookQuery()
+}
+```
+
+1. EntityQuery를 채택하는 Query 구조를 만든다.
+2. 개체를 모두 찾는 기본적인 쿼리
+3. 쿼리를 개체에 연결. `static var`
+
+사용자가 단축어에서 책을 고르면 그 식별자는 단축어에 저장된다 
+단축어가 실행되면 App Intents는 그 식별자를 쿼리에 전달해서 BookEntity instance를 회수한다.
+
+```swift
+struct OpenBook: AppIntent {
+	//1
+	@Parameter(titme: "Book")
+	var book: BookEntity
+
+	static var title: LocalizedStringResource = "Open Book"
+	
+	static var openAppWhenRun = true
+	
+	@MainActor
+	func perform() async throws -> some IntentResult {
+		Navigator.shared.openBook(book)
+		return .result()
+	}
+
+	static var parameterSummary: some ParameterSummary {
+		Summary("Open \(\.$book)")
+	}
+}
+```
+
+1. AppEntity 프로토콜을 따르는 BookEntity는 AppIntent의 paramater로 쓸 수 있다.
+
+책 피커를 구성하기 위해 쿼리는 `Suggested Entities`도 제공해야 한다.
+
+#### Suggested Entities
+```swift
+struct BookQuery: EntityQuery {
+	func entities(for identifiers: [BookEntity.ID]) async throws -> [BookEntity] {
+		identifiers.compactMap { identifier in
+			Database.shared.book(for: identifier)
+		}
+	}
+
+	// 1
+	func suggetsedEntities() async throws -> [BookEntity] {
+		Database.shared.books
+	}
+}
+```
+1. library에 추가된 모든 책을 반환하는 `suggestedEntities()` 구현
+	1. 이 결과는 피커 리스트에 보여진다.
+
+#### Search
+search 바에서 검색을 하면 앱 내 로컬 데이터 베이스에서 직접 쿼리를 돌려야 한다. 이는 StringQuery API로 가능
+
+```swift
+// 1
+struct BookQuery: EntityStringQuery {
+	// ...
+	
+	func entities(matching string: String) async throws -> [BookEntity] {
+		Database.shared.books.filter { book in
+			book.title.localizedCaseInsensitiveContains(string)
+		}
+	}
+}
+```
+
+1. `EntityStringQuery` sub protocol을 채택하면, `entities(matching string:)` method 얻음
+	1. 문자열이 주어질 때, 결과를 되돌려줌
+	2. 대소문자 미구분
+	3. 저자, 시리즈 검색
+
+책이 많다면, favorite books를 suggested에, 나머지 책들은 검색으로 하는 것도 하나의 용례.
+
+앱에서 책을 여는 방법을 노출하기 위해 책 개체와 책 쿼리를 구현했다. 
+동일한 개체와 쿼리를 사용해서 다른 intent를 만들 수도 있다.
+library에 책을 추가하는 intent를 구축하자.
+앱 직접 실행 없이 모델을 직접 수정하는 intent를 구축함으로써 사용자들에게 권한을 줄 수 있음(siri나 다른 앱 실행중에 수정 가능)
+
+```swift
+struct AddBook: AppIntent {
+	static var title: LocalizedStringResources = "Add Book"
+	
+	// 1
+	@Parameter(title: "Title")
+	var title: String
+	
+	// 1
+	@Parameter(title: "Author Name")
+	var authorName: String?
+	
+	// 2
+	@Parameter(title: "Recommemded By")
+	var recommendedBy: String?
+
+	// 3
+	// 5
+	func perform() async throws -> some IntentResult & ReturnsValue<Book> {
+		guard var book = await BooksAPI.shared.findBooks(named: title, author: authorName).first else {
+			throw Error.notFound
+		}
+		book.recommendedBy = recommendedBy
+		Database.shared.add(book: book)
+		return .result(value: book)
+	}
+
+	// 4
+	enum Error: Swift.Error, CustomLocalizedStringResourceConvertible {
+		case notFound
+		// ...
+
+		var localizedStringResource: LocalizedStringResource {
+			switch self {
+				case .notFound: return "Book Not Found"
+				// ...
+			}
+		}
+	}
+}
+```
+1. `title`, `authorName` 은 parameter
+2. optional note인 `recommendedBy`. 어떤 친구가 추천했는지 기록.
+3. async await API 호출로 책을 찾아봄
+4. error를 로컬화하기 위해 오류 타입을 구현한다.
+	1. `CustomLocalizedStringResourceConvertible` : 로컬화된 문자열 키를 return, 문자열 파일에 추가하면 현지화됨.
+
+add book intent가 다른 intent와 결합할 수 있다면 훨씬 더 유연해질 것이다. 이를 위해 API에서 intent의 결과를 다른 intent로 전달하는 도구, Result를 사용할 수 있다.
+5. `perform()` method는 book을 return한다. 함수 정의부에서 리턴타입은 새로운 프로토콜 `ReturnsValue<${TYPE}>`을 채택한다.
+
+이제, add book intent는 book을 parameter로 받는 다른 intent에 선행하여 실행될 수 있음.
+
+`openIntent` [16:30~]
